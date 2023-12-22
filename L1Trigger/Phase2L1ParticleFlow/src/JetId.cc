@@ -2,7 +2,8 @@
 #include "DataFormats/Math/interface/deltaPhi.h"
 #include <cmath>
 
-JetId::JetId(const std::string &iInput, const std::string &iOutput, int iNParticles) {
+JetId::JetId(const std::string &iInput, const std::string &iOutput, const std::shared_ptr<hls4mlEmulator::Model> model, int iNParticles) 
+    :modelRef_(model){
   NNvectorVar_.clear();
   fNParticles_ = iNParticles;
 
@@ -61,7 +62,6 @@ void JetId::setNNVectorVar() {
     NNvectorVar_.push_back(fPhi_.get()[i0]);  //dPhi from jet axis
   }
 }
-// can remove? No, needed for JetId::compute
 float JetId::EvaluateNN() {
   tensorflow::Tensor input(tensorflow::DT_FLOAT, {1, (unsigned int)NNvectorVar_.size(), 1});
   for (unsigned int i = 0; i < NNvectorVar_.size(); i++) {
@@ -72,7 +72,23 @@ float JetId::EvaluateNN() {
   return outputs[0].matrix<float>()(0, 0);
 }  //end EvaluateNN
 
-float JetId::compute(const l1t::PFJet &iJet, float vz, bool useRawPt) {
+ap_fixed<16,6> JetId::EvaluateNNFixed() {
+  ap_fixed<16,6> modelInput[140]={};
+  for (unsigned int i = 0; i < NNvectorVar_.size(); i++) {
+    modelInput[i] = NNvectorVar_[i];
+  }
+  ap_fixed<16,6> modelResult[1];
+  for (int i = 0; i < 1; i++) {
+    modelResult[i] = -1;
+  }
+
+  modelRef_->prepare_input(modelInput);
+  modelRef_->predict();  
+  modelRef_->read_result(modelResult);
+  return modelResult;
+}  //end EvaluateNN
+
+float JetId::compute(const l1t::PFJet &iJet, float vz, bool useRawPt, std::string jobFlavour) {
   for (int i0 = 0; i0 < fNParticles_; i0++) {
     fPt_.get()[i0] = 0;
     fEta_.get()[i0] = 0;
@@ -104,4 +120,38 @@ float JetId::compute(const l1t::PFJet &iJet, float vz, bool useRawPt) {
   }
   setNNVectorVar();
   return EvaluateNN();
+}
+
+float JetId::computeFixed(const l1t::PFJet &iJet, float vz, bool useRawPt, std::string jobFlavour) {
+  for (int i0 = 0; i0 < fNParticles_; i0++) {
+    fPt_.get()[i0] = 0;
+    fEta_.get()[i0] = 0;
+    fPhi_.get()[i0] = 0;
+    fId_.get()[i0] = 0;
+    fCharge_.get()[i0] = 0;
+    fDZ_.get()[i0] = 0;
+    fDX_.get()[i0] = 0;
+    fDY_.get()[i0] = 0;
+  }
+  auto iParts = iJet.constituents();
+  std::sort(iParts.begin(), iParts.end(), [](edm::Ptr<l1t::PFCandidate> i, edm::Ptr<l1t::PFCandidate> j) {
+    return (i->pt() > j->pt());
+  });
+  float jetpt = useRawPt ? iJet.rawPt() : iJet.pt();
+  for (unsigned int i0 = 0; i0 < iParts.size(); i0++) {
+    if (i0 >= (unsigned int)fNParticles_)
+      break;
+    fPt_.get()[i0] = iParts[i0]->pt() / jetpt;
+    fEta_.get()[i0] = iParts[i0]->eta() - iJet.eta();
+    fPhi_.get()[i0] = deltaPhi(iParts[i0]->phi(), iJet.phi());
+    fId_.get()[i0] = iParts[i0]->id();
+    fCharge_.get()[i0] = iParts[i0]->charge();
+    if (iParts[i0]->pfTrack().isNonnull()) {
+      fDX_.get()[i0] = iParts[i0]->pfTrack()->vx();
+      fDY_.get()[i0] = iParts[i0]->pfTrack()->vy();
+      fDZ_.get()[i0] = iParts[i0]->pfTrack()->vz() - vz;
+    }
+  }
+  setNNVectorVar();
+  return EvaluateNNFixed();
 }

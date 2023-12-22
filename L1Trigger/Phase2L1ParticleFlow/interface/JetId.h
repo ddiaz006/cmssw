@@ -22,13 +22,15 @@ struct BJetTFCache {
 
 class JetId {
 public:
-  JetId(const std::string &iInput, const std::string &iOutput, int iNParticles);
+  JetId(const std::string &iInput, const std::string &iOutput, const std::shared_ptr<hls4mlEmulator::Model> model, int iNParticles);
   JetId(const std::string &iInput, const std::string &iOutput, const BJetTFCache *cache, int iNParticles);
   ~JetId();
 
   void setNNVectorVar();
   float EvaluateNN();
+  ap_fixed<16,6> EvaluateNNFixed();
   float compute(const l1t::PFJet &iJet, float vz, bool useRawPt);
+  ap_fixed<16,6> computeFixed(const l1t::PFJet &iJet, float vz, bool useRawPt);
 
 private:
   std::vector<float> NNvectorVar_;
@@ -44,8 +46,6 @@ private:
   unique_ptr<float[]> fDX_;
   unique_ptr<float[]> fDY_;
   tensorflow::Session *sessionRef_;
-  //HLS4ML emulator objects
-  hls4mlEmulator::ModelLoader loader;
-  std::shared_ptr<hls4mlEmulator::Model> model;
+  std::shared_ptr<hls4mlEmulator::Model> modelRef_;
 };
 #endif
